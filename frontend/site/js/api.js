@@ -72,6 +72,7 @@ async function download(path, filename) {
 export const api = {
   get: (path, query) => request(path, { query }),
   post: (path, body) => request(path, { method: 'POST', body }),
+  put: (path, body) => request(path, { method: 'PUT', body }),
   patch: (path, body) => request(path, { method: 'PATCH', body }),
   download,
 };

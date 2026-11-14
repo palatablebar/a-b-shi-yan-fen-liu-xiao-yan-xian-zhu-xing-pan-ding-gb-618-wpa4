@@ -11,6 +11,11 @@
   1. **分流不均没查（SRM）**：某 SDK 版本把 50/50 分成了 52.3/47.7，对照组凭空多 138 个样本，指标差异全被污染；
   2. **只看 p 值不看功效与最小可检测效应**：5,000 份样本去检测 1.1pp 的效应，功效只有 45%，算出来的「显著」其实是噪音；
   3. **多指标同时看没做多重比较校正**：一次实验 4 个指标，随便哪个 p<0.05 就宣布成功，假发现率失控。
+- **上线评审的第四个痛点（本系统⑦）**：评审只看主指标整体，整体显著上涨就申请发布；
+  但高流量渠道持续下滑、其余渠道小幅上涨把总结果拉平（`EXP-2615-FEEDCARD`：整体 10.20%→10.29% 不显著，
+  信息流 10.2%→9.3% 显著负向）。本系统要求**实验开始前**登记主指标 / 护栏指标 / 必验渠道，
+  每次评审按同一口径同时给出整体与渠道判断：任一必验渠道显著负向或护栏恶化即不可上线，
+  挑选表现好的渠道也翻不了案；同一批数据重跑不新增结果、不覆盖原结论；发布时判定与依据一次性切换，失败保留旧版。
 - **上下游**：埋点 → 实验平台（分流）→ **本系统（分流校验 → 指标检验 → 决策建议）** → 产品决策会 / 上线评审。
 - **一天的工作剧本**：
   1. 09:20 实验负责人 `admin@abcheck.io` 登录，总览上 `EXP-2603-CARTBTN` 挂着 **SRM 告警**（χ²=12.696, p=0.000366）；
@@ -27,14 +32,14 @@
 
 | 角色 | 账号 | 权限 | 典型动作 |
 |---|---|---|---|
-| 实验负责人 `admin` | `admin@abcheck.io` | 读写实验、录分流样本、跑 SRM/指标检验、出决策、导出、看审计 | 建实验、跑 χ²、写决策 |
-| 数据分析师 `analyst` | `analyst@abcheck.io` | 读实验/样本/检验/决策 + 导出 CSV | 导出 `metrics.csv` 做周报 |
+| 实验负责人 `admin` | `admin@abcheck.io` | 读写实验、录分流样本、跑 SRM/指标检验、出决策、登记评审口径、跑评审、发布、导出、看审计 | 建实验、跑 χ²、写决策、发布上线 |
+| 数据分析师 `analyst` | `analyst@abcheck.io` | 读实验/样本/检验/决策/评审 + 导出 CSV | 导出 `metrics.csv` 做周报 |
 | 业务只读 `viewer` | `viewer@abcheck.io` | 只读列表与详情 | 看总览、翻实验台账 |
 
 密码统一 `Demo@2026`。跨权调用返回真实 HTTP 状态：无 token **401**，viewer 写/导出/审计 **403**，
 非法参数 **422**，重复自然键（实验编号 / 分流样本格 / 同一实验的第二条决策）**409**。
 
-## 3. 业务模块表（6 个）
+## 3. 业务模块表（7 个）
 
 | # | 业务模块 | 对应页面 | 后端 services / controller | 主要 API |
 |---|---|---|---|---|
@@ -44,6 +49,7 @@
 | ④ | 指标检验（算法 B） | `#/metrics` 指标检验 | `algorithms/metric_test.py` · `metric_service` · `metric_controller` | `GET /api/metrics`、`POST /api/experiments/{id}/metric-tests` |
 | ⑤ | 多重比较与决策 | `#/metrics`（q 值对比）+ `#/decisions` | `metric_service` / `decision_service` · `decision_controller` | `GET /api/decisions`、`POST /api/experiments/{id}/decisions` |
 | ⑥ | 报告导出与台账总览 | `#/decisions`（导出）+ `#/overview` | `export_service` / `overview_service` · `export_controller`、`overview_service` | `GET /api/exports/{experiments,assignments,metrics,decisions}.csv`、`GET /api/overview` |
+| ⑦ | 上线评审（预登记 → 评审 → 发布） | `#/reviews` 上线评审 | `algorithms/review.py` · `review_service` · `review_controller` | `GET /api/reviews`、`GET /api/experiments/{id}/review`、`PUT /api/experiments/{id}/review-plan`、`POST /api/experiments/{id}/review-runs`、`POST /api/experiments/{id}/review-releases` |
 
 横切能力（不算业务模块）：登录/JWT、角色鉴权、审计日志、限流、worker 心跳。
 
@@ -59,7 +65,7 @@ open http://localhost:18207
 
 ```bash
 docker compose exec -T backend python -m scripts.seed_demo
-# SEED_SUMMARY brand=abcheck users=3 sources=6 runs=1092 findings=21 pending=2
+# SEED_SUMMARY brand=abcheck users=3 sources=7 runs=1260 findings=24 pending=3
 ```
 
 ## 5. 本地开发
@@ -96,7 +102,8 @@ cd frontend/site && python -m http.server 5173
 ```text
 backend/
   src/{config,constants,controllers,middlewares,models,routes,schemas,services,utils}
-  src/services/algorithms/{stats,srm,metric_test}.py   # 两个算法 + 统计底座
+  src/services/algorithms/{stats,srm,metric_test,review}.py   # 两个算法 + 评审口径 + 统计底座
+  src/models/review.py  src/services/review_service.py        # 预登记 / 评审记录 / 发布
   scripts/{seed_demo.py,demo_config.py,worker_healthcheck.sh}
   migrations/  tests/
 frontend/site/{index.html,css/{tokens,app}.css,js/{config,api,store,ui,app}.js,js/pages/*.js}
@@ -128,7 +135,22 @@ frontend/site/{index.html,css/{tokens,app}.css,js/{config,api,store,ui,app}.js,j
 - 结论：`q < 0.05` 且 Δ>0 → `ship`（上线）；`q < 0.05` 且 Δ<0 → `stop`（停止）；否则 `continue`（继续观察）。
 - 失败态：样本量为 0、转化数越界、method 非 `bh|bonferroni` → 422。
 
-两个算法都是纯函数（除落库层），同样输入两次逐位一致；`backend/tests/` 覆盖正常 / 边界 / 确定性共 18 个用例。
+两个算法都是纯函数（除落库层），同样输入两次逐位一致；`backend/tests/` 覆盖正常 / 边界 / 确定性共 37 个用例。
+
+### 上线评审口径（`src/services/algorithms/review.py` + `review_service.py`）
+
+- **预登记**：`PUT /experiments/{id}/review-plan` 在实验开始前（`draft`）登记主指标、护栏指标、
+  必验渠道与 α；实验一开始口径即锁定（409），草稿期内重登同内容是幂等空操作。
+- **同一口径**：跑评审与发布的入参 `extra="forbid"`，评审范围只能来自已登记的口径 ——
+  接口层面就不接受临时挑渠道 / 挑指标。
+- **判定**：单格双比例 z 检验（与算法 B 同源），`p<α 且 diff>0 → 显著上涨`，`p<α 且 diff<0 → 显著下滑`，否则不显著。
+  可上线（`ship`）需同时满足：整体（全渠道汇总主指标）显著上涨 ∧ 所有必验渠道无一显著下滑 ∧ 所有护栏无一恶化；
+  否则 `hold` 并给出 `blockers`（如 `channel:feed 主指标显著下滑`）。渠道只判负向、不做正负抵扣。
+- **幂等**：评审结果按 `(experiment_id, variant_code, data_fingerprint)` 落库，只增不改；
+  指纹由口径 + 全部输入数据哈希得到，同一批数据重跑命中自然键 → `200 reused`，不新增行也不覆盖原结论。
+- **原子发布**：`POST /experiments/{id}/review-releases {run_id}` 只接受**最新**评审记录且 `verdict=ship`；
+  判定与依据在同一事务里 upsert 单行 `review_releases`（每实验一行），任何一步失败整体回滚、线上保留旧版；
+  重复发布同一依据是幂等空操作（`switched=false`）。
 
 ## 11. 共享枚举出现位置
 
@@ -137,6 +159,7 @@ frontend/site/{index.html,css/{tokens,app}.css,js/{config,api,store,ui,app}.js,j
 | 角色 `admin/analyst/viewer` | `backend/src/constants/{roles,enums}.py` | `frontend/site/js/config.js`（`ROLE_LABELS` / `PERMISSIONS`） |
 | 实验状态 `draft/running/paused/finished/archived` | `backend/src/constants/enums.py` | `frontend/site/js/config.js`（`ENUMS.experimentStatus`） |
 | 决策结论 `ship/continue/stop` | `backend/src/constants/enums.py` | `frontend/site/js/config.js`（`ENUMS.verdict`） |
+| 评审结论 `ship/hold`、方向 `up/down/flat` | `backend/src/constants/enums.py` | `frontend/site/js/config.js`（`ENUMS.reviewVerdict` / `ENUMS.direction`） |
 | SRM 状态 `balanced/srm/unknown` | `backend/src/constants/enums.py` | `frontend/site/js/config.js`（`ENUMS.srm`） |
 | 渠道 `feed/push/search/mp` | `backend/src/constants/enums.py` | `frontend/site/js/config.js`（`ENUMS.channel`） |
 | 指标口径 `cart_rate/order_rate/retention_d1/click_rate/search_success` | `backend/src/constants/enums.py` | `frontend/site/js/config.js`（`ENUMS.metric`） |

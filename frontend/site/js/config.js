@@ -24,6 +24,7 @@ export const NAV = [
   { to: '#/assignments', no: '03', label: '样本与分流', permission: 'assignment:read' },
   { to: '#/metrics', no: '04', label: '指标检验', permission: 'metric:read' },
   { to: '#/decisions', no: '05', label: '决策与导出', permission: 'decision:read' },
+  { to: '#/reviews', no: '06', label: '上线评审', permission: 'review:read' },
 ];
 
 export const ROLE_LABELS = {
@@ -40,10 +41,11 @@ export const PERMISSIONS = {
     'srm:read', 'srm:run',
     'metric:read', 'metric:run',
     'decision:read', 'decision:write',
+    'review:read', 'review:write',
     'export:read', 'audit:read',
   ],
-  analyst: ['overview:read', 'experiment:read', 'assignment:read', 'srm:read', 'metric:read', 'decision:read', 'export:read'],
-  viewer: ['overview:read', 'experiment:read', 'assignment:read', 'srm:read', 'metric:read', 'decision:read'],
+  analyst: ['overview:read', 'experiment:read', 'assignment:read', 'srm:read', 'metric:read', 'decision:read', 'review:read', 'export:read'],
+  viewer: ['overview:read', 'experiment:read', 'assignment:read', 'srm:read', 'metric:read', 'decision:read', 'review:read'],
 };
 
 export const ENUMS = {
@@ -67,6 +69,15 @@ export const ENUMS = {
   correction: {
     bh: 'BH-FDR',
     bonferroni: 'Bonferroni',
+  },
+  reviewVerdict: {
+    ship: '可上线',
+    hold: '不可上线',
+  },
+  direction: {
+    up: '显著上涨',
+    down: '显著下滑',
+    flat: '不显著',
   },
   metric: {
     cart_rate: '加购转化率',
@@ -99,4 +110,12 @@ export function verdictTone(verdict) {
 
 export function srmTone(status) {
   return { srm: 'srm', balanced: 'ok', unknown: 'pending' }[status] || 'info';
+}
+
+export function reviewTone(verdict) {
+  return { ship: 'ship', hold: 'stop' }[verdict] || 'info';
+}
+
+export function directionTone(direction) {
+  return { up: 'ship', down: 'stop', flat: 'pending' }[direction] || 'info';
 }

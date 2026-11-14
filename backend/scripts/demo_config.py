@@ -154,7 +154,68 @@ EXPERIMENTS = [
             "click_rate": {"control": 0.229, "treat_suggest": 0.235},
         },
     },
+    {
+        # 上线评审演示场景：高流量渠道（信息流 55%）持续下滑，
+        # 其余渠道小幅上涨把总结果拉平 —— 整体不显著 + feed 显著负向 → 不可上线。
+        "code": "EXP-2615-FEEDCARD",
+        "name": "信息流卡片大图改版",
+        "hypothesis": "信息流卡片改大图后，下单转化率提升 1pp。",
+        "primary_metric": "order_rate",
+        "status": "running",
+        "baseline_rate": 0.102,
+        "planned_mde": 0.01,
+        "started_on": date(2026, 6, 22),
+        "traffic_note": "50/50；信息流渠道占 55% 流量，改版只动了信息流卡片。",
+        "channel_weights": {"feed": 0.55, "push": 0.17, "search": 0.15, "mp": 0.13},
+        "variants": [
+            {"code": "control", "name": "对照：小图卡片", "ratio": 0.5, "is_control": True, "note": ""},
+            {"code": "treat_card", "name": "实验：大图卡片", "ratio": 0.5, "is_control": False, "note": ""},
+        ],
+        "targets": {"control": 20000, "treat_card": 20000},
+        "rates": {
+            # order_rate 走 channel_rates（渠道差异化）；这里只是混合后的参考值
+            "order_rate": {"control": 0.102, "treat_card": 0.1029},
+            "retention_d1": {"control": 0.302, "treat_card": 0.301},
+            "cart_rate": {"control": 0.171, "treat_card": 0.176},
+        },
+        "channel_rates": {
+            "order_rate": {
+                "feed": {"control": 0.102, "treat_card": 0.093},
+                "push": {"control": 0.102, "treat_card": 0.114},
+                "search": {"control": 0.102, "treat_card": 0.115},
+                "mp": {"control": 0.102, "treat_card": 0.116},
+            },
+        },
+    },
 ]
+
+# 上线评审预登记口径（seed 模拟实验开始前登记；release=True 的实验同步落一条发布记录）
+REVIEW_PLANS = {
+    "EXP-2610-CASH8": {
+        "primary_metric": "order_rate",
+        "guardrail_metrics": ["retention_d1", "cart_rate"],
+        "required_channels": ["feed", "push", "search", "mp"],
+        "alpha": 0.05,
+        "note": "主指标整体显著上涨，且 4 个必验渠道无一显著下滑，且留存 / 加购护栏不恶化，才可发布。",
+        "release": True,
+    },
+    "EXP-2612-WELCOME": {
+        "primary_metric": "retention_d1",
+        "guardrail_metrics": ["order_rate"],
+        "required_channels": ["feed", "push", "search", "mp"],
+        "alpha": 0.05,
+        "note": "主指标次日留存整体显著下滑即不可上线。",
+        "release": False,
+    },
+    "EXP-2615-FEEDCARD": {
+        "primary_metric": "order_rate",
+        "guardrail_metrics": ["retention_d1"],
+        "required_channels": ["feed", "push", "search", "mp"],
+        "alpha": 0.05,
+        "note": "信息流是高流量必验渠道：渠道显著负向即拦截，挑其余上涨的渠道也翻不了案。",
+        "release": False,
+    },
+}
 
 # 决策（seed 只补缺，不覆盖人工结论）。exp-2613 / exp-2614 故意留空 → pending=2
 DECISIONS = {
@@ -173,13 +234,14 @@ def days(started_on: date) -> list[date]:
     return [started_on + timedelta(days=offset) for offset in range(7)]
 
 
-def distribute(total: int, start: date) -> list[tuple[str, date, int]]:
+def distribute(total: int, start: date, weights: dict[str, float] | None = None) -> list[tuple[str, date, int]]:
     """把变体总样本按 渠道权重 × 日权重 摊到 28 个格子，合计严格等于 total。"""
+    channel_weights = weights or CHANNEL_WEIGHTS
     slots: list[tuple[str, date, float]] = []
     day_list = days(start)
     for channel in channels():
         for index, day in enumerate(day_list):
-            slots.append((channel, day, CHANNEL_WEIGHTS[channel] * DAY_WEIGHTS[index]))
+            slots.append((channel, day, channel_weights[channel] * DAY_WEIGHTS[index]))
     weight_sum = sum(item[2] for item in slots)
     raw = [total * item[2] / weight_sum for item in slots]
     values = [int(math.floor(value)) for value in raw]
@@ -191,15 +253,20 @@ def distribute(total: int, start: date) -> list[tuple[str, date, int]]:
 
 
 def assignment_cells(experiment: dict) -> list[dict]:
-    """生成一个实验的全部分流样本行（含每个指标的转化数）。"""
+    """生成一个实验的全部分流样本行（含每个指标的转化数）。
+
+    指标转化率优先取 channel_rates[指标][渠道]（渠道差异化场景），缺省回落 rates[指标]。
+    """
     cells: list[dict] = []
     start = experiment["started_on"]
+    weights = experiment.get("channel_weights")
+    channel_rates = experiment.get("channel_rates") or {}
     for variant in experiment["variants"]:
         code = variant["code"]
         target = experiment["targets"][code]
-        for channel, day, samples in distribute(target, start):
+        for channel, day, samples in distribute(target, start, weights):
             for metric_key, rate_map in experiment["rates"].items():
-                rate = rate_map[code]
+                rate = channel_rates.get(metric_key, {}).get(channel, rate_map)[code]
                 cells.append(
                     {
                         "experiment_code": experiment["code"],

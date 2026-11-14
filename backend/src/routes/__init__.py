@@ -9,6 +9,7 @@ from src.routes.exports import router as exports_router
 from src.routes.health import router as health_router
 from src.routes.metrics import router as metrics_router
 from src.routes.overview import router as overview_router
+from src.routes.reviews import router as reviews_router
 
 api_router = APIRouter()
 api_router.include_router(health_router)
@@ -17,5 +18,6 @@ api_router.include_router(overview_router)
 api_router.include_router(experiments_router)
 api_router.include_router(metrics_router)
 api_router.include_router(decisions_router)
+api_router.include_router(reviews_router)
 api_router.include_router(exports_router)
 api_router.include_router(audit_router)

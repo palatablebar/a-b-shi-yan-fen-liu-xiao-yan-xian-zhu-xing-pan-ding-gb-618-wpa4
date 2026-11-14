@@ -8,6 +8,7 @@ import experimentsPage from './pages/experiments.js';
 import assignmentsPage from './pages/assignments.js';
 import metricsPage from './pages/metrics.js';
 import decisionsPage from './pages/decisions.js';
+import reviewsPage from './pages/reviews.js';
 
 const routes = [
   { path: '#/overview', page: overviewPage, permission: 'overview:read' },
@@ -15,6 +16,7 @@ const routes = [
   { path: '#/assignments', page: assignmentsPage, permission: 'assignment:read' },
   { path: '#/metrics', page: metricsPage, permission: 'metric:read' },
   { path: '#/decisions', page: decisionsPage, permission: 'decision:read' },
+  { path: '#/reviews', page: reviewsPage, permission: 'review:read' },
 ];
 
 let currentUser = null;

@@ -1,4 +1,4 @@
-"""幂等 seed：3 账号 / 6 实验 / 13 变体 / 1,092 行分流样本 / 指标检验 / 4 条决策。
+"""幂等 seed：3 账号 / 7 实验 / 15 变体 / 1,260 行分流样本 / 指标检验 / 4 条决策 / 3 份评审口径。
 
 自然键 upsert：
   users.email
@@ -7,6 +7,7 @@
   assignments(experiment_id, variant_id, channel, metric_key, stat_date)
   metric_results(experiment_id, variant_code, metric_key)
   decisions(experiment_id)
+  review_plans(experiment_id) / review_runs(experiment_id, variant_code, data_fingerprint) / review_releases(experiment_id)
 重复执行不新增、不覆盖人工改过的决策/状态；SEED_SUMMARY 两次逐字一致。
 
 口径映射（模板 SEED_SUMMARY 键名固定，语义按本项目落点）：
@@ -27,7 +28,14 @@ from src.models.experiment import Experiment
 from src.models.metric_result import MetricResult
 from src.models.user import User
 from src.models.variant import Variant
-from src.services import assignment_service, decision_service, experiment_service, metric_service, srm_service
+from src.services import (
+    assignment_service,
+    decision_service,
+    experiment_service,
+    metric_service,
+    review_service,
+    srm_service,
+)
 from src.utils.security import hash_password
 
 from scripts.demo_config import (
@@ -36,6 +44,7 @@ from scripts.demo_config import (
     DEMO_USERS,
     EXPERIMENTS,
     ORG,
+    REVIEW_PLANS,
     assignment_cells,
 )
 
@@ -193,6 +202,37 @@ def ensure_decisions(db) -> int:
     return db.scalar(select(func.count()).select_from(Decision)) or 0
 
 
+def ensure_reviews(db) -> None:
+    """评审口径（模拟实验开始前登记）→ 跑评审 → 按配置发布；三步都幂等。"""
+    experiments = {item.code: item for item in db.scalars(select(Experiment)).all()}
+    for code, spec in REVIEW_PLANS.items():
+        experiment = experiments.get(code)
+        if experiment is None:
+            continue
+        plan, _ = review_service.upsert_plan(
+            db,
+            experiment,
+            {
+                "primary_metric": spec["primary_metric"],
+                "guardrail_metrics": spec["guardrail_metrics"],
+                "required_channels": spec["required_channels"],
+                "alpha": spec["alpha"],
+                "note": spec["note"],
+            },
+            operator=SEED_OPERATOR,
+            force=True,  # seed 模拟「实验开始前」的登记，绕过状态锁
+        )
+        if plan.seed_key is None:
+            plan.seed_key = f"seed-review-plan-{code}"
+        run, _ = review_service.run_review(db, experiment, operator=SEED_OPERATOR)
+        if run.seed_key is None:
+            run.seed_key = f"seed-review-run-{code}"
+        if spec.get("release") and review_service.get_release(db, experiment.id) is None:
+            release, _ = review_service.release(db, experiment, run.id, operator="admin@abcheck.io")
+            release.seed_key = f"seed-review-release-{code}"
+    db.flush()
+
+
 def ensure_audit(db) -> None:
     seeds = [
         ("seed-audit-1", "admin@abcheck.io", "admin", "experiment.create", "experiment", {"code": "EXP-2603-CARTBTN"}),
@@ -224,6 +264,7 @@ def seed_all() -> dict:
         assignments = ensure_assignments(db, variants)
         findings = run_checks(db)
         ensure_decisions(db)
+        ensure_reviews(db)
         ensure_audit(db)
         pending = db.scalar(
             select(func.count())

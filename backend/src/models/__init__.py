@@ -13,6 +13,7 @@ from src.models.variant import Variant  # noqa: E402
 from src.models.assignment import Assignment  # noqa: E402
 from src.models.metric_result import MetricResult  # noqa: E402
 from src.models.decision import Decision  # noqa: E402
+from src.models.review import ReviewPlan, ReviewRelease, ReviewRun  # noqa: E402
 
 __all__ = [
     "Base",
@@ -23,4 +24,7 @@ __all__ = [
     "Assignment",
     "MetricResult",
     "Decision",
+    "ReviewPlan",
+    "ReviewRun",
+    "ReviewRelease",
 ]

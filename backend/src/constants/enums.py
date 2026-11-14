@@ -110,6 +110,34 @@ SRM_STATUS_LABELS: dict[str, str] = {
 }
 
 
+class ReviewVerdict(StrEnum):
+    """上线评审结论：ship 可发布 / hold 不可上线。"""
+
+    SHIP = "ship"
+    HOLD = "hold"
+
+
+REVIEW_VERDICT_LABELS: dict[str, str] = {
+    ReviewVerdict.SHIP.value: "可上线",
+    ReviewVerdict.HOLD.value: "不可上线",
+}
+
+
+class ReviewDirection(StrEnum):
+    """单格检验方向（整体 / 渠道 / 护栏共用同一口径）。"""
+
+    UP = "up"
+    DOWN = "down"
+    FLAT = "flat"
+
+
+REVIEW_DIRECTION_LABELS: dict[str, str] = {
+    ReviewDirection.UP.value: "显著上涨",
+    ReviewDirection.DOWN.value: "显著下滑",
+    ReviewDirection.FLAT.value: "不显著",
+}
+
+
 class CorrectionMethod(StrEnum):
     """多重比较校正方法。"""
 
